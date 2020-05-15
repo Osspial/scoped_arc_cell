@@ -1,31 +1,32 @@
 //! Shared mutable datastructure, with the mutability tied to the liveliness of a owner struct.
 
-#![no_std]
-extern crate alloc;
-
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    error::Error,
+    fmt::{self, Debug, Display, Formatter},
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
+};
 use crossbeam_utils::atomic::AtomicCell;
 
 pub fn scoped_arc_cell<T: Copy>(val: T) -> (ScopedArcCell<T>, ScopedArcCellOwner<T>) {
-    let data = Arc::new(Data {
-        val: AtomicCell::new(val),
-        is_read_only: AtomicBool::new(false),
-    });
-    (ScopedArcCell{ data: data.clone() }, ScopedArcCellOwner{ data })
+    let owner = ScopedArcCellOwner::new(val);
+    (owner.create_arc_cell(), owner)
 }
 
+#[derive(Debug, Clone)]
 pub struct ScopedArcCell<T: Copy> {
     data: Arc<Data<T>>,
 }
 
+#[derive(Debug)]
 pub struct ScopedArcCellOwner<T: Copy> {
     data: Arc<Data<T>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StoreError<T>(pub T);
 
-struct Data<T> {
+#[derive(Debug)]
+struct Data<T: Copy> {
     val: AtomicCell<T>,
     is_read_only: AtomicBool,
 }
@@ -54,6 +55,18 @@ impl<T: Copy> ScopedArcCell<T> {
 }
 
 impl<T: Copy> ScopedArcCellOwner<T> {
+    pub fn new(val: T) -> ScopedArcCellOwner<T> {
+        let data = Arc::new(Data {
+            val: AtomicCell::new(val),
+            is_read_only: AtomicBool::new(false),
+        });
+        ScopedArcCellOwner{ data }
+    }
+
+    pub fn create_arc_cell(&self) -> ScopedArcCell<T> {
+        ScopedArcCell{ data: self.data.clone() }
+    }
+
     pub fn store(&self, val: T) {
         self.data.val.store(val)
     }
@@ -74,5 +87,12 @@ impl<T: Copy> ScopedArcCellOwner<T> {
 impl<T: Copy> Drop for ScopedArcCellOwner<T> {
     fn drop(&mut self) {
         self.data.is_read_only.store(true, Ordering::Release);
+    }
+}
+
+impl<T: Debug> Error for StoreError<T> {}
+impl<T> Display for StoreError<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "the ScopedArcCellOwner was destroyed, making this ScopedArcCell read-only")
     }
 }

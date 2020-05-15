@@ -1,3 +1,5 @@
+//! Shared mutable datastructure, with the mutability tied to the liveliness of a owner struct.
+
 #![no_std]
 extern crate alloc;
 
